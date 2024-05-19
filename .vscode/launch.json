@@ -4,7 +4,7 @@
             "name": "[P1] Debug a Test",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/userprog/build/kernel.o",
+            "program": "${workspaceFolder}/vm/build/kernel.o",
             "miDebuggerServerAddress": "localhost:1234",
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

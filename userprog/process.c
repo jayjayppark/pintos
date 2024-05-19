@@ -485,6 +485,14 @@ struct ELF64_PHDR
 	uint64_t p_align;
 };
 
+struct container {
+	struct file *file;
+	off_t ofs;
+	uint32_t page_read_bytes;
+	uint32_t page_zero_bytes;
+};
+
+
 /* Abbreviations */
 #define ELF ELF64_hdr
 #define Phdr ELF64_PHDR
@@ -821,8 +829,24 @@ static bool
 lazy_load_segment(struct page *page, void *aux)
 {
 	/* TODO: Load the segment from the file */
+	struct container *container = (struct container *)aux;
+	struct file *file = container->file;
 	/* TODO: This called when the first page fault occurs on address VA. */
 	/* TODO: VA is available when calling this function. */
+	if (page == NULL)
+		return false;
+
+	file_seek(file, container->ofs);
+	
+
+	/* Load this page. */
+	if (file_read(file, page->frame->kva, container->page_read_bytes) != (int)container->page_read_bytes)
+	{
+		palloc_free_page(page->frame->kva);
+		return false;
+	}
+	memset(page->frame->kva + container->page_read_bytes, 0, container->page_zero_bytes);
+	return true;
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
@@ -856,7 +880,12 @@ load_segment(struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		void *aux = NULL;
+		struct container *aux = (struct container *)malloc(sizeof(struct container));
+		aux->file = file;
+		aux->ofs = ofs;
+		aux->page_read_bytes = page_read_bytes;
+		aux->page_zero_bytes = page_zero_bytes;
+
 		if (!vm_alloc_page_with_initializer(VM_ANON, upage,
 											writable, lazy_load_segment, aux))
 			return false;
@@ -865,6 +894,7 @@ load_segment(struct file *file, off_t ofs, uint8_t *upage,
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
 		upage += PGSIZE;
+		ofs += page_read_bytes;
 	}
 	return true;
 }
@@ -880,7 +910,14 @@ setup_stack(struct intr_frame *if_)
 	 * TODO: If success, set the rsp accordingly.
 	 * TODO: You should mark the page is stack */
 	/* TODO: Your code goes here */
+	// if(vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, 1)){
+	// 	success = vm_claim_page(stack_bottom);
 
-	return success;
+	// 	if(success){
+	// 		if_->rsp = USER_STACK;
+	// 		thread_current()->stack_bottom = stack_bottom;
+	// 	}
+	// }
+	// return success;
 }
 #endif /* VM */

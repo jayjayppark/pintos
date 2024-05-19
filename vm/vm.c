@@ -91,12 +91,10 @@ spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
 	struct page *page = (struct page*)malloc(sizeof(struct page));
 	page->va = pg_round_down(va);
 	/* TODO: Fill this function. */
-	struct hash_elem *e = hash_find(spt->hash_spt, &page->hash_elem);
+	struct hash_elem *e = hash_find(&spt->hash_spt, &page->hash_elem);
 	free(page);
 
-
-	page = hash_entry(e, struct page, hash_elem);
-	return page;
+	return  e != NULL ? hash_entry (e, struct page, hash_elem) : NULL;;
 }
 
 /* Insert PAGE into spt with validation. */
@@ -104,7 +102,7 @@ bool
 spt_insert_page (struct supplemental_page_table *spt UNUSED, struct page *page UNUSED) {
 
 	/* TODO: Fill this function. */
-	if(!hash_insert(spt->hash_spt, &page->hash_elem))
+	if(!hash_insert(&spt->hash_spt, &page->hash_elem))
 		return true;
 	else
 		return false;
@@ -179,12 +177,22 @@ vm_handle_wp (struct page *page UNUSED) {
 bool
 vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 		bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
+	
 	struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
-
-	return vm_do_claim_page (page);
+	if (is_kernel_vaddr(addr) && user) {
+        return false;
+	}
+    if (not_present){
+        if (!vm_claim_page(addr)) {
+            return false;
+        }
+        else
+            return true;
+    }
+    return false;
 }
 
 /* Free the page.
@@ -242,7 +250,7 @@ bool hash_less (const struct hash_elem *a, const struct hash_elem *b, void *aux)
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
-	hash_init ( spt->hash_spt, &hash_func, &hash_less, NULL); 
+	hash_init (&spt->hash_spt, &hash_func, &hash_less, NULL); 
 }
 
 /* Copy supplemental page table from src to dst */
