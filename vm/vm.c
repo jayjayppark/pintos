@@ -1,9 +1,11 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
 #include "threads/malloc.h"
+#include "hash.h"
 #include "vm/vm.h"
 #include "vm/inspect.h"
-
+#include "include/threads/mmu.h"
+struct list frame_list;
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
 void
@@ -16,6 +18,7 @@ vm_init (void) {
 	register_inspect_intr ();
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
+	list_init(&frame_list);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -39,7 +42,10 @@ static struct frame *vm_evict_frame (void);
 
 /* Create the pending page object with initializer. If you want to create a
  * page, do not create it directly and make it through this function or
- * `vm_alloc_page`. */
+ * `vm_alloc_page`. 
+ * 페이지 폴트가 일어나면, 페이지 폴트 핸들러는 vm_try_handle_fault 함수에게 제어권을 넘긴다.
+ * 	함수 역할: 페이지 폴트가 유효한지 먼저 확인
+ * bogus 오류인 경우 일부 내용으 페이지에 로드하고 사용자 프로그램에 제어 권한을 반환함*/
 bool
 vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 		vm_initializer *init, void *aux) {
@@ -49,12 +55,31 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 	struct supplemental_page_table *spt = &thread_current ()->spt;
 
 	/* Check wheter the upage is already occupied or not. */
+	typedef (*initializer_by_type)(struct page *, enum vm_type, void *);
+	initializer_by_type initializer = NULL;
+	
 	if (spt_find_page (spt, upage) == NULL) {
 		/* TODO: Create the page, fetch the initialier according to the VM type,
 		 * TODO: and then create "uninit" page struct by calling uninit_new. You
 		 * TODO: should modify the field after calling the uninit_new. */
+		struct page *page = (struct page*)malloc(sizeof(struct page));
+
+		switch (VM_TYPE(type))
+		{
+		case (VM_ANON):/* constant-expression */
+			initializer = anon_initializer;
+			break;
+		
+		case (VM_FILE):
+			initializer = file_backed_initializer;
+			break;
+		}
+
+		uninit_new(page, upage, init, type, aux, initializer);
+		page->writable = writable;
 
 		/* TODO: Insert the page into the spt. */
+		return spt_insert_page(spt, page);
 	}
 err:
 	return false;
@@ -63,20 +88,26 @@ err:
 /* Find VA from spt and return page. On error, return NULL. */
 struct page *
 spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
-	struct page *page = NULL;
+	struct page *page = (struct page*)malloc(sizeof(struct page));
+	page->va = pg_round_down(va);
 	/* TODO: Fill this function. */
+	struct hash_elem *e = hash_find(spt->hash_spt, &page->hash_elem);
+	free(page);
 
+
+	page = hash_entry(e, struct page, hash_elem);
 	return page;
 }
 
 /* Insert PAGE into spt with validation. */
 bool
-spt_insert_page (struct supplemental_page_table *spt UNUSED,
-		struct page *page UNUSED) {
-	int succ = false;
-	/* TODO: Fill this function. */
+spt_insert_page (struct supplemental_page_table *spt UNUSED, struct page *page UNUSED) {
 
-	return succ;
+	/* TODO: Fill this function. */
+	if(!hash_insert(spt->hash_spt, &page->hash_elem))
+		return true;
+	else
+		return false;
 }
 
 void
@@ -90,7 +121,16 @@ static struct frame *
 vm_get_victim (void) {
 	struct frame *victim = NULL;
 	 /* TODO: The policy for eviction is up to you. */
-
+	struct thread *curr = thread_current();
+	struct list_elem *frame_e;
+	for(frame_e = list_begin(&frame_list); frame_e != list_tail(&frame_list); frame_e = list_next(&frame_list)){
+		victim = list_entry(frame_e, struct frame, frame_elem);
+		if(!pml4_is_accessed(curr->pml4, victim->page->va))
+			return victim;
+		else
+			pml4_set_accessed(curr->pml4, victim->page->va, 0);	
+		
+	}
 	return victim;
 }
 
@@ -98,9 +138,9 @@ vm_get_victim (void) {
  * Return NULL on error.*/
 static struct frame *
 vm_evict_frame (void) {
-	struct frame *victim UNUSED = vm_get_victim ();
+	struct frame *victim = vm_get_victim ();
 	/* TODO: swap out the victim and return the evicted frame. */
-
+	swap_out(victim->page);
 	return NULL;
 }
 
@@ -110,9 +150,16 @@ vm_evict_frame (void) {
  * space.*/
 static struct frame *
 vm_get_frame (void) {
-	struct frame *frame = NULL;
+	struct frame *frame = (struct frame *)malloc(sizeof (struct frame));
+	frame->kva = palloc_get_page(PAL_USER);
 	/* TODO: Fill this function. */
-
+	if(frame->kva == NULL){
+		frame = vm_evict_frame();
+		frame->page = NULL;
+		return frame;
+	}
+	list_push_back(&frame_list, &frame->frame_elem);
+	frame->page = NULL;
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
 	return frame;
@@ -153,7 +200,10 @@ bool
 vm_claim_page (void *va UNUSED) {
 	struct page *page = NULL;
 	/* TODO: Fill this function */
-
+	struct thread *curr = thread_current();
+	page = spt_find_page(&curr->spt, va);
+	if(page == NULL)
+		return false;
 	return vm_do_claim_page (page);
 }
 
@@ -166,14 +216,33 @@ vm_do_claim_page (struct page *page) {
 	frame->page = page;
 	page->frame = frame;
 
+	struct thread *curr = thread_current();
+	
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
-
+	pml4_set_page(curr->pml4, page->va, frame->kva, page->writable);
 	return swap_in (page, frame->kva);
+}
+
+uint64_t hash_func (const struct hash_elem *e, void *aux){
+	struct page *page = hash_entry(e, struct page, hash_elem);
+
+	return hash_bytes(&page->va, sizeof page->va);
+}
+
+/* Compares the value of two hash elements A and B, given
+ * auxiliary data AUX.  Returns true if A is less than B, or
+ * false if A is greater than or equal to B. */
+bool hash_less (const struct hash_elem *a, const struct hash_elem *b, void *aux){
+	struct page *a_p = hash_entry(a, struct page, hash_elem);
+	struct page *b_p = hash_entry(b, struct page, hash_elem);
+
+	return a_p->va < b_p->va;
 }
 
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
+	hash_init ( spt->hash_spt, &hash_func, &hash_less, NULL); 
 }
 
 /* Copy supplemental page table from src to dst */

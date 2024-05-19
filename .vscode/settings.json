@@ -10,6 +10,18 @@
         "stdint.h": "c",
         "syscall-nr.h": "c",
         "intrinsic.h": "c",
-        "loader.h": "c"
+        "loader.h": "c",
+        "process.h": "c",
+        "vm.h": "c",
+        "array": "c",
+        "chrono": "c",
+        "compare": "c",
+        "functional": "c",
+        "ratio": "c",
+        "tuple": "c",
+        "type_traits": "c",
+        "utility": "c",
+        "hash.h": "c",
+        "mmu.h": "c"
     }
 }
