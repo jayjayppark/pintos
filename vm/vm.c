@@ -5,6 +5,8 @@
 #include "vm/vm.h"
 #include "vm/inspect.h"
 #include "include/threads/mmu.h"
+#include "include/userprog/process.h"
+
 struct list frame_list;
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -94,7 +96,7 @@ spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
 	struct hash_elem *e = hash_find(&spt->hash_spt, &page->hash_elem);
 	free(page);
 
-	return  e != NULL ? hash_entry (e, struct page, hash_elem) : NULL;;
+	return  e != NULL ? hash_entry (e, struct page, hash_elem) : NULL;
 }
 
 /* Insert PAGE into spt with validation. */
@@ -182,6 +184,7 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
+	// printf(f->rsp);
 	if (is_kernel_vaddr(addr) && user) {
         return false;
 	}
@@ -257,6 +260,39 @@ supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
 bool
 supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 		struct supplemental_page_table *src UNUSED) {
+		
+	struct hash_iterator iter;
+	hash_first(&iter, &src->hash_spt);
+
+	while(hash_next(&iter)){
+		struct page *page = hash_entry(hash_cur(&iter), struct page, hash_elem);
+		enum vm_type type = page->operations->type; // 이 페이지의 현재 상태 타입
+
+		if(type == VM_UNINIT){ // page->uninit.type 이 페이지가 다음에 접근될 때 적용할 type
+			if(!vm_alloc_page_with_initializer(page->uninit.type, page->va, page->writable, page->uninit.init, page->uninit.aux))
+				return false;
+		}else{
+			if(!vm_alloc_page(type, page->va, page->writable))
+				return false;
+
+			if(!vm_claim_page(page->va))
+				return false;
+		}
+
+		if(type != VM_UNINIT){
+			struct page *child_page = spt_find_page(dst, page->va);
+			memcpy(child_page->frame->kva, page->frame->kva, PGSIZE);
+		}
+	}
+	return true;
+}
+
+void hash_destructor (struct hash_elem *e, void *aux){
+	struct page *page = hash_entry(e, struct page, hash_elem);
+	if(page != NULL){
+		destroy(page);
+		free(page);
+	}
 }
 
 /* Free the resource hold by the supplemental page table */
@@ -264,4 +300,5 @@ void
 supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
+	hash_clear(&spt->hash_spt, hash_destructor);
 }

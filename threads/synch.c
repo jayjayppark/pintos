@@ -127,9 +127,9 @@ void sema_up(struct semaphore *sema)
 								  struct thread, elem));
 	}
 	sema->value++;
-	intr_set_level(old_level);
 	/* #2 Priority Scheduling : ready_list내의 우선순위가 변경되었으므로 호출 */
 	priority_schedule();
+	intr_set_level(old_level);
 }
 
 static void sema_test_helper(void *sema_);

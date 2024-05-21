@@ -1,6 +1,7 @@
 /* file.c: Implementation of memory backed file object (mmaped object). */
 
 #include "vm/vm.h"
+#include "include/threads/mmu.h"
 
 static bool file_backed_swap_in (struct page *page, void *kva);
 static bool file_backed_swap_out (struct page *page);
@@ -44,6 +45,17 @@ file_backed_swap_out (struct page *page) {
 static void
 file_backed_destroy (struct page *page) {
 	struct file_page *file_page UNUSED = &page->file;
+	struct thread *curr = thread_current();
+	// if(pml4_is_dirty(curr->pml4, page->va)){
+	// 	file_write_at(page->file, )
+	// }
+
+	// if(page->frame){
+	// 	list_remove(&page->frame->frame_elem);
+	// 	page->frame->page = NULL;
+	// 	page->frame = NULL;
+	// 	free(page);
+	// }
 }
 
 /* Do the mmap */

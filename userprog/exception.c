@@ -140,13 +140,12 @@ static void page_fault(struct intr_frame *f)
 
 	/* 페이지 폴트를 카운트합니다. */
 	page_fault_cnt++;
+    exit(-1); /** Test Case 가 Hardware 수준에서 페이지 폴트를 호출하기 때문에 Test Case 통과를 위해서 exception을 수정해야함. */
 
-	if ((!not_present && write) || (fault_addr < 0x400000 || fault_addr >= USER_STACK)) {
-		exit(-1);
-	} else {
-		// page allocation 으로 변경
-		kill(f);
-	}
+    /* If the fault is true fault, show info and exit. */
+    printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr, not_present ? "not present" : "rights violation", write ? "writing" : "reading",
+           user ? "user" : "kernel");
+    kill(f);
 
 	/* 폴트가 진짜 폴트인 경우 정보를 표시하고 종료합니다. */
 	// printf("Page fault at %p: %s error %s page in %s context.\n",

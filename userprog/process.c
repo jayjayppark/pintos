@@ -333,7 +333,6 @@ int process_exec(void *f_name)
 	palloc_free_page(file_name);
 	if (!success)
 	{
-		exit(-1);
 		return -1;
 	}
 
@@ -421,6 +420,7 @@ process_cleanup(void)
 		pml4_activate(NULL);
 		pml4_destroy(pml4);
 	}
+
 }
 
 /* Sets up the CPU for running user code in the nest thread.
@@ -497,7 +497,7 @@ struct container {
 #define ELF ELF64_hdr
 #define Phdr ELF64_PHDR
 
-static bool setup_stack(struct intr_frame *if_);
+
 static bool validate_segment(const struct Phdr *, struct file *);
 static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
 						 uint32_t read_bytes, uint32_t zero_bytes,
@@ -644,7 +644,9 @@ load(const char *file_name, struct intr_frame *if_)
 
 	char *stack_p = if_->rsp - length + padding; // padding 건너뜀
 	char **argv_p = if_->rsp - total_length + 8; // return address 건너뜀
-
+	memset(stack_p-padding-8, 0, sizeof(void *));
+	memset(stack_p-padding, 0, sizeof(void *));
+	memset(argv_p-1, 0, sizeof(void *));
 	if_->R.rsi = argv_p;
 	if_->rsp = argv_p - 1;
 	if_->R.rdi = count;
@@ -846,6 +848,7 @@ lazy_load_segment(struct page *page, void *aux)
 		return false;
 	}
 	memset(page->frame->kva + container->page_read_bytes, 0, container->page_zero_bytes);
+
 	return true;
 }
 
@@ -886,9 +889,10 @@ load_segment(struct file *file, off_t ofs, uint8_t *upage,
 		aux->page_read_bytes = page_read_bytes;
 		aux->page_zero_bytes = page_zero_bytes;
 
-		if (!vm_alloc_page_with_initializer(VM_ANON, upage,
-											writable, lazy_load_segment, aux))
+		if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable, lazy_load_segment, aux)){
+			free(aux);
 			return false;
+		}
 
 		/* Advance. */
 		read_bytes -= page_read_bytes;
@@ -900,7 +904,7 @@ load_segment(struct file *file, off_t ofs, uint8_t *upage,
 }
 
 /* Create a PAGE of stack at the USER_STACK. Return true on success. */
-static bool
+bool
 setup_stack(struct intr_frame *if_)
 {
 	bool success = false;
@@ -910,14 +914,15 @@ setup_stack(struct intr_frame *if_)
 	 * TODO: If success, set the rsp accordingly.
 	 * TODO: You should mark the page is stack */
 	/* TODO: Your code goes here */
-	// if(vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, 1)){
-	// 	success = vm_claim_page(stack_bottom);
+	if(vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, 1)){
+		success = vm_claim_page(stack_bottom);
 
-	// 	if(success){
-	// 		if_->rsp = USER_STACK;
-	// 		thread_current()->stack_bottom = stack_bottom;
-	// 	}
-	// }
-	// return success;
+		if(success){
+			if_->rsp = USER_STACK;
+			// thread_current()->stack_bottom = stack_bottom;
+		}
+	}
+	
+	return success;
 }
 #endif /* VM */

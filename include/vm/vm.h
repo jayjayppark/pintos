@@ -79,7 +79,7 @@ struct page_operations {
 	enum vm_type type;
 };
 
-#define swap_in(page, v) (page)->operations->swap_in ((page), v)
+#define swap_in(page, v) (page)->operations->swap_in ((page), v) // fault 핸들러에서 claim 에서 swap in 호출 -> swap in은 각 페이지 유형별 initializer 함수 호출
 #define swap_out(page) (page)->operations->swap_out (page)
 #define destroy(page) \
 	if ((page)->operations->destroy) (page)->operations->destroy (page)

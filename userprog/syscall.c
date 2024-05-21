@@ -72,6 +72,9 @@ void syscall_init(void)
 void syscall_handler(struct intr_frame *f)
 {
 	uint64_t sys_no = f->R.rax;
+#ifdef VM
+	thread_current()->rsp_pointer = f->rsp;
+#endif
 	if (sys_no >= 0x0 && sys_no <= 0x18)
 	{
 		switch (sys_no)
@@ -131,7 +134,7 @@ void check_address(void *addr)
 {
 	struct thread *t = thread_current();
 	if (!is_user_vaddr(addr) || addr == NULL ||
-		pml4_get_page(t->pml4, addr) == NULL)
+		spt_find_page(&t->spt, addr) == NULL)
 	{
 		exit(-1);
 	}

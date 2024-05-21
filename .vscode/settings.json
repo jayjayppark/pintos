@@ -25,6 +25,8 @@
         "mmu.h": "c",
         "disk.h": "c",
         "palloc.h": "c",
-        "uninit.h": "c"
+        "uninit.h": "c",
+        "main.h": "c",
+        "numbers": "c"
     }
 }
