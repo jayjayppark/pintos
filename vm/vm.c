@@ -168,6 +168,17 @@ vm_get_frame (void) {
 /* Growing the stack. */
 static void
 vm_stack_growth (void *addr UNUSED) {
+
+	void *stack_bottom = thread_current()->stack_bottom;
+	bool success = false;
+
+	if(vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom-PGSIZE, 1)){
+		success = vm_claim_page(stack_bottom-PGSIZE);
+
+		if(success){
+			thread_current()->stack_bottom = stack_bottom-PGSIZE;
+		}
+	}
 }
 
 /* Handle the fault on write_protected page */
@@ -181,19 +192,25 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 		bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
 	
 	struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
-	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
 	// printf(f->rsp);
-	if (is_kernel_vaddr(addr) && user) {
+	if (addr == NULL || is_kernel_vaddr(addr)) {
         return false;
 	}
+
     if (not_present){
-        if (!vm_claim_page(addr)) {
-            return false;
+		void *stack_pointer = user ? f->rsp : thread_current()->rsp_pointer;
+		/* stack 영역에 의한 fault일 경우 새로운 스택 페이지를 할당하는 과정 */
+        if (addr >= stack_pointer - 8 && addr >= USER_STACK - (1 << 20) && addr <= USER_STACK) {
+            vm_stack_growth(addr);
+			return true;
         }
-        else
-            return true;
+		struct page *page = spt_find_page(spt, addr);
+		if(!page)
+			return false;
+		else
+			return vm_do_claim_page(page);
     }
     return false;
 }

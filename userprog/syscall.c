@@ -18,7 +18,7 @@ void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 
 /* User Memory */
-void check_address(void *addr);
+struct page* check_address(void *addr);
 
 /* System Calls */
 void halt();
@@ -36,6 +36,10 @@ int write(int fd, void *buffer, unsigned size);
 unsigned tell(int fd);
 void seek(int fd, unsigned position);
 int dup2(int oldfd, int newfd);
+
+/* virtual memory */
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset);
+void munmap (void *addr);
 
 /* filesys lock */
 struct lock fd_lock;
@@ -72,11 +76,11 @@ void syscall_init(void)
 void syscall_handler(struct intr_frame *f)
 {
 	uint64_t sys_no = f->R.rax;
-#ifdef VM
-	thread_current()->rsp_pointer = f->rsp;
-#endif
 	if (sys_no >= 0x0 && sys_no <= 0x18)
 	{
+		#ifdef VM
+			thread_current()->rsp_pointer = f->rsp;
+		#endif
 		switch (sys_no)
 		{
 		case SYS_HALT:
@@ -124,20 +128,27 @@ void syscall_handler(struct intr_frame *f)
 		case SYS_DUP2:
 			f->R.rax = dup2(f->R.rdi, f->R.rsi);
 			break;
+		case SYS_MMAP:
+			f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
+			break;
+		case SYS_MUNMAP:
+			f->R.rax = munmap(f->R.rdi);
+			break;
 		}
 	}
 }
 
 /* [User Memory] check_address:
    addr가 user mode에서 접근 가능한 주소인지 확인 */
-void check_address(void *addr)
+struct page* check_address(void *addr)
 {
 	struct thread *t = thread_current();
-	if (!is_user_vaddr(addr) || addr == NULL ||
-		spt_find_page(&t->spt, addr) == NULL)
+	struct page *page = spt_find_page(&t->spt, addr);
+	if (!is_user_vaddr(addr) || addr == NULL || page == NULL)
 	{
 		exit(-1);
 	}
+	return page;
 }
 
 /* [System call] halt:
@@ -182,7 +193,10 @@ int exec(const char *file_name)
 bool create(const char *file_name, unsigned int iniital_size)
 {
 	check_address(file_name);
-	return filesys_create(file_name, iniital_size);
+	lock_acquire(&fd_lock);
+	bool success = filesys_create(file_name, iniital_size);
+	lock_release(&fd_lock);
+	return success;
 }
 
 /* [System call] wait:
@@ -226,7 +240,9 @@ int open(const char *file_name)
 	if (list_size(&curr->fdt) > FD_MAX)
 		return -1;
 
+	lock_acquire(&fd_lock);
 	_file = filesys_open(file_name);
+	lock_release(&fd_lock);
 	file_elem = new_file_elem();
 
 	if (!_file || !file_elem)
@@ -268,7 +284,12 @@ void close(int fd)
  * fd의 파일에서 size만큼 읽어서 buffer에 저장한 후 길이 반환 */
 int read(int fd, void *buffer, unsigned size)
 {
-	check_address(buffer);
+	for(int i = 0; i < size; i++){
+		struct page *page = check_address(buffer+i);
+		if(!page->writable){
+			exit(-1);
+		}
+	}
 
 	struct file_elem *file_elem = fd_get_file_elem(fd);
 
@@ -303,7 +324,12 @@ int filesize(int fd)
  * fd의 파일에 buffer의 값을 size만큼 쓴 후 길이 반환 */
 int write(int fd, void *buffer, unsigned size)
 {
-	check_address(buffer);
+	for(int i = 0; i < size; i++){
+		struct page *page = check_address(buffer+i);
+		if(!page->writable){
+			exit(-1);
+		}
+	}
 
 	struct file_elem *file_elem = fd_get_file_elem(fd);
 
@@ -350,8 +376,10 @@ void seek(int fd, unsigned position)
 
 	/* stdin,stdout이 아니라면 file_seek */
 	if (file_elem && file_elem->file && file_elem->type == 0)
-	{
+	{	
+		lock_acquire(&fd_lock);
 		file_seek(file_elem->file, position);
+		lock_release(&fd_lock);
 	}
 }
 
@@ -470,4 +498,28 @@ void fd_close(struct fd_elem *fd_elem)
 			free(file_elem);
 		}
 	}
+}
+
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset){
+	struct thread *curr = thread_current();
+	struct file_elem *file = fd_get_file_elem(fd_find(fd)->fd);
+
+	if(pg_round_down(addr) != addr || addr == NULL)
+		return false;
+	if(pg_round_down(offset) != offset || offset % PGSIZE != 0)
+		return false;
+	if(!is_user_vaddr(addr) || !is_user_vaddr(addr+length))
+		return false;
+	if(spt_find_page(&curr->spt, addr))
+		return false;
+	if(file->type == FD_STDIN || file->type == FD_STDOUT || file->file == NULL)
+		return false;
+	if( file_length(file->file) <= 0 || length <= 0)
+		return false;
+	
+	return do_mmap (addr, length, writable, file->file, offset);
+}
+
+void munmap (void *addr){
+	return do_munmap(addr);
 }

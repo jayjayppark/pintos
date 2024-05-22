@@ -485,13 +485,6 @@ struct ELF64_PHDR
 	uint64_t p_align;
 };
 
-struct container {
-	struct file *file;
-	off_t ofs;
-	uint32_t page_read_bytes;
-	uint32_t page_zero_bytes;
-};
-
 
 /* Abbreviations */
 #define ELF ELF64_hdr
@@ -559,6 +552,7 @@ load(const char *file_name, struct intr_frame *if_)
 	process_activate(thread_current());
 
 	/* Open executable file. */
+	lock_acquire(&fd_lock);
 	file = filesys_open(file_name);
 	if (file == NULL)
 	{
@@ -669,6 +663,7 @@ load(const char *file_name, struct intr_frame *if_)
 
 	success = true;
 done:
+	lock_release(&fd_lock);
 	return success;
 }
 
@@ -827,7 +822,7 @@ install_page(void *upage, void *kpage, bool writable)
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
 
-static bool
+bool
 lazy_load_segment(struct page *page, void *aux)
 {
 	/* TODO: Load the segment from the file */
@@ -919,7 +914,7 @@ setup_stack(struct intr_frame *if_)
 
 		if(success){
 			if_->rsp = USER_STACK;
-			// thread_current()->stack_bottom = stack_bottom;
+			thread_current()->stack_bottom = stack_bottom;
 		}
 	}
 	

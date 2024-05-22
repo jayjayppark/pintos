@@ -47,4 +47,5 @@ struct file_elem *fd_get_file_elem(int fd);
 struct file_elem *new_file_elem();
 struct fd_elem *register_fd(struct file_elem *file_elem, int fd);
 
+extern struct lock fd_lock;
 #endif /* userprog/syscall.h */
