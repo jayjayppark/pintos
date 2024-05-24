@@ -77,7 +77,7 @@ void syscall_handler(struct intr_frame *f)
 {
 	uint64_t sys_no = f->R.rax;
 	if (sys_no >= 0x0 && sys_no <= 0x18)
-	{
+	{	
 		#ifdef VM
 			thread_current()->rsp_pointer = f->rsp;
 		#endif
@@ -132,7 +132,7 @@ void syscall_handler(struct intr_frame *f)
 			f->R.rax = mmap(f->R.rdi, f->R.rsi, f->R.rdx, f->R.r10, f->R.r8);
 			break;
 		case SYS_MUNMAP:
-			f->R.rax = munmap(f->R.rdi);
+			munmap(f->R.rdi);
 			break;
 		}
 	}
@@ -231,6 +231,7 @@ int open(const char *file_name)
 {
 	check_address(file_name);
 
+	lock_acquire(&fd_lock);
 	struct thread *curr = thread_current();
 
 	struct file *_file = NULL;
@@ -238,11 +239,9 @@ int open(const char *file_name)
 	struct fd_elem *fd_elem = NULL;
 
 	if (list_size(&curr->fdt) > FD_MAX)
-		return -1;
+		goto error;
 
-	lock_acquire(&fd_lock);
 	_file = filesys_open(file_name);
-	lock_release(&fd_lock);
 	file_elem = new_file_elem();
 
 	if (!_file || !file_elem)
@@ -259,10 +258,12 @@ int open(const char *file_name)
 
 	file_elem->file = _file;
 	list_push_back(&curr->fdt, &file_elem->elem);
+	lock_release(&fd_lock);
 
 	return fd_elem->fd;
 
 error:
+	lock_release(&fd_lock);
 	if (_file)
 		file_close(_file);
 	if (file_elem)
@@ -323,10 +324,10 @@ int filesize(int fd)
 /* [System call] write:
  * fd의 파일에 buffer의 값을 size만큼 쓴 후 길이 반환 */
 int write(int fd, void *buffer, unsigned size)
-{
+{	
 	for(int i = 0; i < size; i++){
-		struct page *page = check_address(buffer+i);
-		if(!page->writable){
+		struct page *page = check_address(buffer+i); // buffer 가 페이지 경계에 걸쳐있으면 페이지가 바뀌므로 체크해줘야 함.
+		if(!page){
 			exit(-1);
 		}
 	}
@@ -377,9 +378,9 @@ void seek(int fd, unsigned position)
 	/* stdin,stdout이 아니라면 file_seek */
 	if (file_elem && file_elem->file && file_elem->type == 0)
 	{	
-		lock_acquire(&fd_lock);
+		// lock_acquire(&fd_lock);
 		file_seek(file_elem->file, position);
-		lock_release(&fd_lock);
+		// lock_release(&fd_lock);
 	}
 }
 
@@ -505,21 +506,21 @@ void *mmap (void *addr, size_t length, int writable, int fd, off_t offset){
 	struct file_elem *file = fd_get_file_elem(fd_find(fd)->fd);
 
 	if(pg_round_down(addr) != addr || addr == NULL)
-		return false;
-	if(pg_round_down(offset) != offset || offset % PGSIZE != 0)
-		return false;
+		return NULL;
+	if(offset % PGSIZE != 0)
+		return NULL;
 	if(!is_user_vaddr(addr) || !is_user_vaddr(addr+length))
-		return false;
+		return NULL;
 	if(spt_find_page(&curr->spt, addr))
-		return false;
+		return NULL;
 	if(file->type == FD_STDIN || file->type == FD_STDOUT || file->file == NULL)
-		return false;
-	if( file_length(file->file) <= 0 || length <= 0)
-		return false;
+		return NULL;
+	if( file_length(file->file) <= 0 || (long)length <= 0)
+		return NULL;
 	
 	return do_mmap (addr, length, writable, file->file, offset);
 }
 
 void munmap (void *addr){
-	return do_munmap(addr);
+	do_munmap(addr);
 }

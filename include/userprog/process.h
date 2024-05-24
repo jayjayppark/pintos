@@ -17,6 +17,7 @@ struct container {
 	off_t ofs;
 	uint32_t page_read_bytes;
 	uint32_t page_zero_bytes;
+    size_t length;
 };
 
 bool lazy_load_segment(struct page *page, void *aux);

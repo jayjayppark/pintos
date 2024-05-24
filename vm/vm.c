@@ -123,7 +123,7 @@ vm_get_victim (void) {
 	 /* TODO: The policy for eviction is up to you. */
 	struct thread *curr = thread_current();
 	struct list_elem *frame_e;
-	for(frame_e = list_begin(&frame_list); frame_e != list_tail(&frame_list); frame_e = list_next(&frame_list)){
+	for(frame_e = list_begin(&frame_list); frame_e != list_end(&frame_list); frame_e = list_next(frame_e)){
 		victim = list_entry(frame_e, struct frame, frame_elem);
 		if(!pml4_is_accessed(curr->pml4, victim->page->va))
 			return victim;
@@ -131,7 +131,7 @@ vm_get_victim (void) {
 			pml4_set_accessed(curr->pml4, victim->page->va, 0);	
 		
 	}
-	return victim;
+	return list_entry(list_begin(&frame_list), struct frame, frame_elem);
 }
 
 /* Evict one page and return the corresponding frame.
@@ -140,8 +140,10 @@ static struct frame *
 vm_evict_frame (void) {
 	struct frame *victim = vm_get_victim ();
 	/* TODO: swap out the victim and return the evicted frame. */
-	swap_out(victim->page);
-	return NULL;
+	// printf("\n\n%p\n\n", victim->kva);
+	if(victim->page != NULL)
+		swap_out(victim->page);
+	return victim;
 }
 
 /* palloc() and get frame. If there is no available page, evict the page
@@ -151,7 +153,7 @@ vm_evict_frame (void) {
 static struct frame *
 vm_get_frame (void) {
 	struct frame *frame = (struct frame *)malloc(sizeof (struct frame));
-	frame->kva = palloc_get_page(PAL_USER);
+	frame->kva = palloc_get_page(PAL_USER | PAL_ZERO);
 	/* TODO: Fill this function. */
 	if(frame->kva == NULL){
 		frame = vm_evict_frame();
@@ -199,20 +201,22 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
         return false;
 	}
 
-    if (not_present){
+	/* 페이지가 물리 메모리에 존재하는데 폴트가 났음 : 1. 페이지 보호 위반 2. 비정렬된 접근 3. 페이지 테이블 손상 4. 메모리 매핑 오류 5. 하드웨어 문제 */
+    if (!not_present) 
+		return false; 
+		
+	/* 페이지가 물리 메모리에 존재하지 않는 경우 */
+	if(!vm_claim_page(addr)){ // uninit 페이지가 존재하면 물리 매핑 해줌
 		void *stack_pointer = user ? f->rsp : thread_current()->rsp_pointer;
 		/* stack 영역에 의한 fault일 경우 새로운 스택 페이지를 할당하는 과정 */
-        if (addr >= stack_pointer - 8 && addr >= USER_STACK - (1 << 20) && addr <= USER_STACK) {
-            vm_stack_growth(addr);
+		/* uninit 이 존재하지 않으면 즉, 할당받은 적이 없는 페이지이면 stack growth */
+		if (addr >= stack_pointer - 8 && addr >= USER_STACK - (1 << 20) && addr <= USER_STACK) {
+			vm_stack_growth(addr);
 			return true;
-        }
-		struct page *page = spt_find_page(spt, addr);
-		if(!page)
-			return false;
-		else
-			return vm_do_claim_page(page);
-    }
-    return false;
+		}
+		return false; // 페이지가 존재하지 않는데 uninit 도 없고, stack grow 의 대상도 아님.
+	}
+	return true;
 }
 
 /* Free the page.
@@ -248,6 +252,7 @@ vm_do_claim_page (struct page *page) {
 	
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
 	pml4_set_page(curr->pml4, page->va, frame->kva, page->writable);
+
 	return swap_in (page, frame->kva);
 }
 

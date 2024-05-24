@@ -4,7 +4,10 @@
 struct page;
 enum vm_type;
 
+#define SLOT_SIZE (PGSIZE / DISK_SECTOR_SIZE)
+
 struct anon_page {
+    size_t slot;
 };
 void vm_anon_init (void);
 bool anon_initializer (struct page *page, enum vm_type type, void *kva);
