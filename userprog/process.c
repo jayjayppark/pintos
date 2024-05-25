@@ -419,9 +419,9 @@ process_cleanup(void)
 		curr->pml4 = NULL;
 		pml4_activate(NULL);
 		pml4_destroy(pml4);
-	}
-
 }
+}
+
 
 /* Sets up the CPU for running user code in the nest thread.
  * This function is called on every context switch. */

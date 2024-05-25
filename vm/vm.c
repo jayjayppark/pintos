@@ -8,6 +8,7 @@
 #include "include/userprog/process.h"
 
 struct list frame_list;
+struct lock frame_lock;
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
 void
@@ -21,6 +22,7 @@ vm_init (void) {
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
 	list_init(&frame_list);
+	lock_init(&frame_lock);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -156,11 +158,14 @@ vm_get_frame (void) {
 	frame->kva = palloc_get_page(PAL_USER | PAL_ZERO);
 	/* TODO: Fill this function. */
 	if(frame->kva == NULL){
+		free(frame);
 		frame = vm_evict_frame();
 		frame->page = NULL;
 		return frame;
 	}
+	lock_acquire(&frame_lock);
 	list_push_back(&frame_list, &frame->frame_elem);
+	lock_release(&frame_lock);
 	frame->page = NULL;
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
@@ -186,6 +191,34 @@ vm_stack_growth (void *addr UNUSED) {
 /* Handle the fault on write_protected page */
 static bool
 vm_handle_wp (struct page *page UNUSED) {
+	if(!page)
+		return false;
+
+	if (page->frame->accessed < 1)
+        return false;
+	lock_acquire(&frame_lock);
+	page->frame->accessed -= 1;
+	void *kva = page->frame->kva;
+
+	struct frame* frame = malloc(sizeof(struct frame));
+	frame->kva = palloc_get_page(PAL_USER || PAL_ZERO);
+
+	if(frame->kva == NULL){
+		free(frame);
+		frame = vm_evict_frame();
+	}
+	list_push_back(&frame_list, &frame->frame_elem);
+	
+	frame->page = page;
+	page->frame = frame;
+	frame->accessed = 1;
+	lock_release(&frame_lock);
+
+	if(!pml4_set_page(thread_current()->pml4, page->va, frame->kva, true))
+		return false;
+	memcpy(frame->kva, kva, PGSIZE);
+
+	return true;
 }
 
 /* Return true on success */
@@ -201,10 +234,15 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
         return false;
 	}
 
+	struct page *page = spt_find_page(spt, addr);
+
 	/* 페이지가 물리 메모리에 존재하는데 폴트가 났음 : 1. 페이지 보호 위반 2. 비정렬된 접근 3. 페이지 테이블 손상 4. 메모리 매핑 오류 5. 하드웨어 문제 */
-    if (!not_present) 
-		return false; 
-		
+    if (!not_present && write) 
+		return vm_handle_wp(page); 
+
+	if(!not_present)
+		return false;
+	
 	/* 페이지가 물리 메모리에 존재하지 않는 경우 */
 	if(!vm_claim_page(addr)){ // uninit 페이지가 존재하면 물리 매핑 해줌
 		void *stack_pointer = user ? f->rsp : thread_current()->rsp_pointer;
@@ -252,7 +290,9 @@ vm_do_claim_page (struct page *page) {
 	
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
 	pml4_set_page(curr->pml4, page->va, frame->kva, page->writable);
-
+	lock_acquire(&frame_lock);
+	frame->accessed = 1;
+	lock_release(&frame_lock);
 	return swap_in (page, frame->kva);
 }
 
@@ -300,17 +340,26 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 			if(!vm_alloc_page(type, page->va, page->writable))
 				return false;
 
-			if(!vm_claim_page(page->va))
-				return false;
+			lock_acquire(&frame_lock);
+			page->frame->accessed += 1;
+			lock_release(&frame_lock);
+			
 			child_page = spt_find_page(dst, page->va);
-			memcpy(child_page->frame->kva, page->frame->kva, PGSIZE);
+			child_page->frame = page->frame;
+
+			if(!pml4_set_page(thread_current()->pml4, child_page->va, page->frame->kva, false))
+				return false;
+			// if(!vm_claim_page(page->va))
+			// 	return false;
+			// child_page = spt_find_page(dst, page->va);
+			// memcpy(child_page->frame->kva, page->frame->kva, PGSIZE);
 			break;
 		case VM_FILE: // 파일 공유 객체 만들기
 			if(!vm_alloc_page_with_initializer(type, page->va, page->writable, NULL, &page->file))
 				return false;
 
 			child_page = spt_find_page(dst, page->va);
-			if(!file_backed_initializer(child_page, type, NULL))
+			if(!file_backed_initializer(child_page, type, NULL)) // init 함수가 NULL이기 때문에 직접 initializer 를 호출해야 함.
 				return false;
 			child_page->frame = page->frame;
 

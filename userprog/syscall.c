@@ -285,12 +285,12 @@ void close(int fd)
  * fd의 파일에서 size만큼 읽어서 buffer에 저장한 후 길이 반환 */
 int read(int fd, void *buffer, unsigned size)
 {
-	for(int i = 0; i < size; i++){
-		struct page *page = check_address(buffer+i);
-		if(!page->writable){
-			exit(-1);
-		}
-	}
+	// for(int i = 0; i < size; i++){
+	// 	struct page *page = check_address(buffer+i);
+	// 	if(!page->writable){
+	// 		exit(-1);
+	// 	}
+	// }
 
 	struct file_elem *file_elem = fd_get_file_elem(fd);
 
@@ -325,12 +325,12 @@ int filesize(int fd)
  * fd의 파일에 buffer의 값을 size만큼 쓴 후 길이 반환 */
 int write(int fd, void *buffer, unsigned size)
 {	
-	for(int i = 0; i < size; i++){
-		struct page *page = check_address(buffer+i); // buffer 가 페이지 경계에 걸쳐있으면 페이지가 바뀌므로 체크해줘야 함.
-		if(!page){
-			exit(-1);
-		}
-	}
+	// for(int i = 0; i < size; i++){
+	// 	struct page *page = check_address(buffer+i); // buffer 가 페이지 경계에 걸쳐있으면 페이지가 바뀌므로 체크해줘야 함.
+	// 	if(!page){
+	// 		exit(-1);
+	// 	}
+	// }
 
 	struct file_elem *file_elem = fd_get_file_elem(fd);
 

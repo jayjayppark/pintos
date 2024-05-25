@@ -24,6 +24,9 @@ enum vm_type {
 	VM_MARKER_END = (1 << 31),
 };
 
+extern struct list frame_list;
+extern struct lock frame_lock;
+
 #include "vm/uninit.h"
 #include "vm/anon.h"
 #include "vm/file.h"
@@ -66,6 +69,7 @@ struct frame {
 	void *kva;
 	struct page *page;
 	struct list_elem frame_elem;
+	uint32_t accessed;
 };
 
 /* The function table for page operations.

@@ -79,8 +79,10 @@ anon_swap_out (struct page *page) {
 	anon_page->slot = idx;
 
 	// list_remove(&page->frame->frame_elem); // 이 부분 이해 필요함
-	// page->frame->page = NULL;
+	page->frame->accessed -= 1;
+	page->frame->page = NULL;
 	// free(page->frame);
+
 	page->frame = NULL;
 
 	pml4_clear_page(thread_current()->pml4, page->va);
@@ -95,12 +97,17 @@ anon_destroy (struct page *page) {
 	if (anon_page->slot != BITMAP_ERROR)
         bitmap_reset(b, anon_page->slot);
 
-	if(page->frame && page->frame->page == page){
+	pml4_activate(NULL);
+	if(page->frame->accessed == 1){
+		lock_acquire(&frame_lock);
 		list_remove(&page->frame->frame_elem);
-        page->frame->page = NULL;
-		// palloc_free_page(page->frame->kva);
+		lock_release(&frame_lock);
+		palloc_free_page(page->frame->kva);
         free(page->frame);
-        page->frame = NULL;
-    }
-	// pml4_clear_page(curr->pml4, page->va);
+    }else{
+		page->frame->accessed -= 1;
+	}
+	page->frame->page = NULL;
+	page->frame = NULL;
+	pml4_clear_page(curr->pml4, page->va);
 }
