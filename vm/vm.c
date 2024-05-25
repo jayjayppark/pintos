@@ -289,21 +289,35 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 	while(hash_next(&iter)){
 		struct page *page = hash_entry(hash_cur(&iter), struct page, hash_elem);
 		enum vm_type type = page->operations->type; // 이 페이지의 현재 상태 타입
-
-		if(type == VM_UNINIT){ // page->uninit.type 이 페이지가 다음에 접근될 때 적용할 type
+		struct page *child_page;
+		switch (type)
+		{
+		case VM_UNINIT:
 			if(!vm_alloc_page_with_initializer(page->uninit.type, page->va, page->writable, page->uninit.init, page->uninit.aux))
 				return false;
-		}else{
+			break;
+		case VM_ANON:
 			if(!vm_alloc_page(type, page->va, page->writable))
 				return false;
 
 			if(!vm_claim_page(page->va))
 				return false;
-		}
-
-		if(type != VM_UNINIT){
-			struct page *child_page = spt_find_page(dst, page->va);
+			child_page = spt_find_page(dst, page->va);
 			memcpy(child_page->frame->kva, page->frame->kva, PGSIZE);
+			break;
+		case VM_FILE: // 파일 공유 객체 만들기
+			if(!vm_alloc_page_with_initializer(type, page->va, page->writable, NULL, &page->file))
+				return false;
+
+			child_page = spt_find_page(dst, page->va);
+			if(!file_backed_initializer(child_page, type, NULL))
+				return false;
+			child_page->frame = page->frame;
+
+			pml4_set_page(thread_current()->pml4, child_page->va, child_page->frame->kva, page->writable);
+			break;
+		default:
+			return false;
 		}
 	}
 	return true;

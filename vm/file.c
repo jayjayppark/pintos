@@ -25,15 +25,16 @@ vm_file_init (void) {
 bool
 file_backed_initializer (struct page *page, enum vm_type type, void *kva) {
 	/* Set up the handler */
+    struct container *aux = (struct container *)page->uninit.aux;
 	page->operations = &file_ops; // page의 operation이 file ops 로 초기화 됨.
 	struct file_page *file_page = &page->file;
-	struct container* aux = (struct container*)page->uninit.aux;
 
-	// file_page->file = aux->file;
-	// file_page->ofs = aux->ofs;
-	// file_page->page_read_bytes = aux->page_read_bytes;
-	// file_page->page_zero_bytes = aux->page_zero_bytes;
-	// file_page->length = aux->length;
+    file_page->file = aux->file;
+    file_page->ofs = aux->ofs;
+    file_page->page_read_bytes = aux->page_read_bytes;
+	file_page->length = aux->length;
+	file_page->page_zero_bytes = aux->page_zero_bytes;
+
 	return true;
 }
 
@@ -41,18 +42,18 @@ file_backed_initializer (struct page *page, enum vm_type type, void *kva) {
 static bool
 file_backed_swap_in (struct page *page, void *kva) {
 
-	struct container* aux = (struct container*)page->uninit.aux;
-	struct file *file = aux->file;
+	struct file_page *file_page = &page->file;
+	struct file *file = file_page->file;
 
-	file_seek(file, aux->ofs);
+	file_seek(file, file_page->ofs);
 	
 	/* Load this page. */
-	if (file_read(file, page->frame->kva, aux->page_read_bytes) != (int)aux->page_read_bytes)
+	if (file_read(file, page->frame->kva, file_page->page_read_bytes) != (int)file_page->page_read_bytes)
 	{
 		palloc_free_page(page->frame->kva);
 		return false;
 	}
-	memset(page->frame->kva + aux->page_read_bytes, 0, aux->page_zero_bytes);
+	memset(page->frame->kva + file_page->page_read_bytes, 0, file_page->page_zero_bytes);
 
 	return true;
 }
@@ -60,11 +61,11 @@ file_backed_swap_in (struct page *page, void *kva) {
 /* Swap out the page by writeback contents to the file. */
 static bool
 file_backed_swap_out (struct page *page) {
-	struct container* aux = (struct container*)page->uninit.aux;
+	struct file_page *file_page = &page->file;
 	struct thread *curr = thread_current();
 	if(pml4_is_dirty(curr->pml4, page->va)){
 		// lock_acquire(&fd_lock);
-		file_write_at(aux->file, page->va, aux->page_read_bytes, aux->ofs);
+		file_write_at(file_page->file, page->va, file_page->page_read_bytes, file_page->ofs);
 		// lock_release(&fd_lock);
 		pml4_set_dirty(curr->pml4, page->va, false);
 	}
@@ -78,20 +79,21 @@ file_backed_swap_out (struct page *page) {
 /* Destory the file backed page. PAGE will be freed by the caller. */
 static void
 file_backed_destroy (struct page *page) {
-	struct container *aux = page->uninit.aux;
+	struct file_page *file_page = &page->file;
 	struct thread *curr = thread_current();
 	if(pml4_is_dirty(curr->pml4, page->va)){
 		// lock_acquire(&fd_lock);
-		file_write_at(aux->file, page->va, aux->page_read_bytes, aux->ofs);
+		file_write_at(file_page->file, page->va, file_page->page_read_bytes, file_page->ofs);
 		// lock_release(&fd_lock);
 		pml4_set_dirty(curr->pml4, page->va, 0);
 	}
 
-	if(page->frame){
+	if(page->frame && page->frame->page == page){
 		list_remove(&page->frame->frame_elem);
         page->frame->page = NULL;
-        page->frame = NULL;
+		palloc_free_page(page->frame->kva);
         free(page->frame);
+        page->frame = NULL;
     }
 	pml4_clear_page(curr->pml4, page->va);
 }
@@ -146,7 +148,7 @@ do_munmap (void *addr) {
 	struct thread *curr = thread_current();
 	struct page *page = spt_find_page(&curr->spt, addr);
 	
-	struct container *aux = page->uninit.aux;
+	struct file_page *aux = &page->file;
 	int map_pg_cnt = (aux->length) % PGSIZE == 0 ? aux->length/PGSIZE : aux->length/PGSIZE+1;
 	// lock_acquire(&fd_lock);
 	while(map_pg_cnt != 0){
