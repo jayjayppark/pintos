@@ -65,4 +65,15 @@ uninit_destroy (struct page *page) {
 	struct uninit_page *uninit UNUSED = &page->uninit;
 	/* TODO: Fill this function.
 	 * TODO: If you don't have anything to do, just return. */
+	if(page->frame && page->frame->page == page){
+		// lock_acquire(&frame_lock);
+		list_remove(&page->frame->frame_elem);
+		// lock_release(&frame_lock);
+        page->frame->page = NULL;
+		palloc_free_page(page->frame->kva);
+		page->frame->kva = NULL;
+        free(page->frame);
+        page->frame = NULL;
+    }
+	pml4_clear_page(thread_current()->pml4, page->va);
 }

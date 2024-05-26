@@ -145,6 +145,9 @@ vm_evict_frame (void) {
 	// printf("\n\n%p\n\n", victim->kva);
 	if(victim->page != NULL)
 		swap_out(victim->page);
+
+	list_remove(&victim->frame_elem);
+	memset(victim->kva, 0 ,PGSIZE);
 	return victim;
 }
 
@@ -161,11 +164,14 @@ vm_get_frame (void) {
 		free(frame);
 		frame = vm_evict_frame();
 		frame->page = NULL;
+		// lock_acquire(&frame_lock);
+		list_push_back(&frame_list, &frame->frame_elem);
+		// lock_release(&frame_lock);
 		return frame;
 	}
-	lock_acquire(&frame_lock);
+	// lock_acquire(&frame_lock);
 	list_push_back(&frame_list, &frame->frame_elem);
-	lock_release(&frame_lock);
+	// lock_release(&frame_lock);
 	frame->page = NULL;
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
@@ -179,7 +185,7 @@ vm_stack_growth (void *addr UNUSED) {
 	void *stack_bottom = thread_current()->stack_bottom;
 	bool success = false;
 
-	if(vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom-PGSIZE, 1)){
+	if(vm_alloc_page(VM_ANON | VM_MARKER_0, (void *)(stack_bottom-PGSIZE), 1)){
 		success = vm_claim_page(stack_bottom-PGSIZE);
 
 		if(success){
@@ -194,25 +200,25 @@ vm_handle_wp (struct page *page UNUSED) {
 	if(!page)
 		return false;
 
-	if (page->frame->accessed < 1)
+	if (page->frame->accessed <= 1)
         return false;
-	lock_acquire(&frame_lock);
 	page->frame->accessed -= 1;
 	void *kva = page->frame->kva;
 
-	struct frame* frame = malloc(sizeof(struct frame));
-	frame->kva = palloc_get_page(PAL_USER || PAL_ZERO);
+	struct frame* frame = (struct frame *)malloc(sizeof (struct frame));
+	frame->kva = palloc_get_page(PAL_USER | PAL_ZERO);
 
 	if(frame->kva == NULL){
 		free(frame);
 		frame = vm_evict_frame();
 	}
+	// lock_acquire(&frame_lock);
 	list_push_back(&frame_list, &frame->frame_elem);
+	// lock_release(&frame_lock);
 	
+	frame->accessed = 1;
 	frame->page = page;
 	page->frame = frame;
-	frame->accessed = 1;
-	lock_release(&frame_lock);
 
 	if(!pml4_set_page(thread_current()->pml4, page->va, frame->kva, true))
 		return false;
@@ -290,9 +296,9 @@ vm_do_claim_page (struct page *page) {
 	
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
 	pml4_set_page(curr->pml4, page->va, frame->kva, page->writable);
-	lock_acquire(&frame_lock);
+	// lock_acquire(&frame_lock);
 	frame->accessed = 1;
-	lock_release(&frame_lock);
+	// lock_release(&frame_lock);
 	return swap_in (page, frame->kva);
 }
 
@@ -337,18 +343,19 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 				return false;
 			break;
 		case VM_ANON:
-			if(!vm_alloc_page(type, page->va, page->writable))
-				return false;
+			// if(!vm_alloc_page(type, page->va, page->writable))
+			// 	return false;
+			child_page = calloc(1, sizeof (struct page));
+            memcpy(child_page, page, sizeof (struct page));
+            spt_insert_page(dst, child_page);
 
-			lock_acquire(&frame_lock);
+			// lock_acquire(&frame_lock);
 			page->frame->accessed += 1;
-			lock_release(&frame_lock);
-			
-			child_page = spt_find_page(dst, page->va);
-			child_page->frame = page->frame;
+			// lock_release(&frame_lock);
 
 			if(!pml4_set_page(thread_current()->pml4, child_page->va, page->frame->kva, false))
 				return false;
+
 			// if(!vm_claim_page(page->va))
 			// 	return false;
 			// child_page = spt_find_page(dst, page->va);
@@ -362,7 +369,7 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 			if(!file_backed_initializer(child_page, type, NULL)) // init 함수가 NULL이기 때문에 직접 initializer 를 호출해야 함.
 				return false;
 			child_page->frame = page->frame;
-
+			child_page->writable = page->writable;
 			pml4_set_page(thread_current()->pml4, child_page->va, child_page->frame->kva, page->writable);
 			break;
 		default:

@@ -25,8 +25,8 @@ vm_file_init (void) {
 bool
 file_backed_initializer (struct page *page, enum vm_type type, void *kva) {
 	/* Set up the handler */
-    struct container *aux = (struct container *)page->uninit.aux;
 	page->operations = &file_ops; // page의 operation이 file ops 로 초기화 됨.
+    struct container *aux = (struct container *)page->uninit.aux;
 	struct file_page *file_page = &page->file;
 
     file_page->file = aux->file;
@@ -64,12 +64,12 @@ file_backed_swap_out (struct page *page) {
 	struct file_page *file_page = &page->file;
 	struct thread *curr = thread_current();
 	if(pml4_is_dirty(curr->pml4, page->va)){
-		// lock_acquire(&fd_lock);
+		// lock_acquire(&frame_lock);
 		file_write_at(file_page->file, page->va, file_page->page_read_bytes, file_page->ofs);
-		// lock_release(&fd_lock);
+		// lock_release(&frame_lock);
 		pml4_set_dirty(curr->pml4, page->va, false);
 	}
-	// page->frame->page = NULL;
+	page->frame->page = NULL;
 	page->frame = NULL;
 
 	pml4_clear_page(curr->pml4, page->va);
@@ -82,21 +82,22 @@ file_backed_destroy (struct page *page) {
 	struct file_page *file_page = &page->file;
 	struct thread *curr = thread_current();
 	if(pml4_is_dirty(curr->pml4, page->va)){
-		// lock_acquire(&fd_lock);
+		// lock_acquire(&frame_lock);
 		file_write_at(file_page->file, page->va, file_page->page_read_bytes, file_page->ofs);
-		// lock_release(&fd_lock);
+		// lock_release(&frame_lock);
 		pml4_set_dirty(curr->pml4, page->va, 0);
 	}
 
 	if(page->frame && page->frame->page == page){
-		lock_acquire(&frame_lock);
+		// lock_acquire(&frame_lock);
 		list_remove(&page->frame->frame_elem);
-		lock_release(&frame_lock);
-        page->frame->page = NULL;
+		// lock_release(&frame_lock);
 		palloc_free_page(page->frame->kva);
+    	page->frame->page = NULL;
+		page->frame->kva = NULL;
         free(page->frame);
-        page->frame = NULL;
     }
+    page->frame = NULL;
 	pml4_clear_page(curr->pml4, page->va);
 }
 
@@ -104,7 +105,7 @@ file_backed_destroy (struct page *page) {
 void *
 do_mmap (void *addr, size_t length, int writable,
 		struct file *file, off_t offset) {
-	// lock_acquire(&fd_lock);
+	// lock_acquire(&frame_lock);
 	struct file* cpy_file = file_reopen(file);
 	uint32_t read_bytes = (length > file_length(cpy_file)) ? file_length(cpy_file) : length;
 	uint32_t zero_bytes = PGSIZE - (read_bytes % PGSIZE);
@@ -130,7 +131,7 @@ do_mmap (void *addr, size_t length, int writable,
 		aux->page_zero_bytes = page_zero_bytes;
 		aux->length = length;
 		if (!vm_alloc_page_with_initializer(VM_FILE, upage, writable, lazy_load_segment, aux)){
-			// lock_release(&fd_lock);
+			// lock_release(&frame_lock);
 			return false;
 		}
 
@@ -140,7 +141,7 @@ do_mmap (void *addr, size_t length, int writable,
 		upage += PGSIZE;
 		offset += page_read_bytes;
 	}
-	// lock_release(&fd_lock);
+	// lock_release(&frame_lock);
 	return addr;
 }
 
@@ -152,7 +153,7 @@ do_munmap (void *addr) {
 	
 	struct file_page *aux = &page->file;
 	int map_pg_cnt = (aux->length) % PGSIZE == 0 ? aux->length/PGSIZE : aux->length/PGSIZE+1;
-	// lock_acquire(&fd_lock);
+	// lock_acquire(&frame_lock);
 	while(map_pg_cnt != 0){
 		if(page)
 			destroy(page);
@@ -160,5 +161,5 @@ do_munmap (void *addr) {
 		page=spt_find_page(&curr->spt, addr);
 		map_pg_cnt--;
 	}
-	// lock_release(&fd_lock);	
+	// lock_release(&frame_lock);	
 }
