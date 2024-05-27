@@ -343,12 +343,14 @@ supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 				return false;
 			break;
 		case VM_ANON:
-			// if(!vm_alloc_page(type, page->va, page->writable))
-			// 	return false;
-			child_page = calloc(1, sizeof (struct page));
-            memcpy(child_page, page, sizeof (struct page));
-            spt_insert_page(dst, child_page);
-
+			if(!vm_alloc_page(type, page->va, page->writable))
+				return false;
+			
+			child_page = spt_find_page(dst, page->va);
+			child_page->operations = page->operations;
+			child_page->writable = page->writable;
+			child_page->frame = page->frame;
+			
 			// lock_acquire(&frame_lock);
 			page->frame->accessed += 1;
 			// lock_release(&frame_lock);
