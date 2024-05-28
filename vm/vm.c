@@ -59,7 +59,7 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 	ASSERT (VM_TYPE(type) != VM_UNINIT)
 
 	struct supplemental_page_table *spt = &thread_current ()->spt;
-
+	upage = pg_round_down(upage);
 	/* Check wheter the upage is already occupied or not. */
 	if (spt_find_page (spt, upage) == NULL) {
 		/* TODO: Create the page, fetch the initialier according to the VM type,
@@ -86,6 +86,7 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 		uninit_new(new_page, upage, init, type, aux, page_initializer);
 
 		new_page->writable = writable;
+		new_page->pml4 = thread_current()->pml4;
 		if (!spt_insert_page(spt, new_page)) {
 			free(new_page);
 			return false;
@@ -124,6 +125,7 @@ spt_insert_page (struct supplemental_page_table *spt UNUSED,
 
 void
 spt_remove_page (struct supplemental_page_table *spt, struct page *page) {
+	hash_delete(&thread_current()->spt.spt_table, &page->hash_elem);
 	vm_dealloc_page (page);
 	return true;
 }
@@ -138,8 +140,8 @@ vm_get_victim (void) {
 	struct list_elem *e = list_begin(&frame_table);
 	for (e; e != list_end(&frame_table); e = list_next(e)) {
 		victim = list_entry(e, struct frame, frame_elem);
-		if (pml4_is_accessed(curr->pml4, victim->page->va))
-			pml4_set_accessed(curr->pml4, victim->page->va, false);
+		if (pml4_is_accessed(victim->page->pml4, victim->page->va))
+			pml4_set_accessed(victim->page->pml4, victim->page->va, false);
         else
             return victim;
 	}
@@ -155,7 +157,6 @@ vm_evict_frame (void) {
 	/* TODO: swap out the victim and return the evicted frame. */
 	if (victim->page)
         swap_out(victim->page);
-	victim->page=NULL;
 	memset(victim->kva,0,PGSIZE);
 
     return victim;
@@ -175,6 +176,7 @@ vm_get_frame (void) {
 	void *kva = palloc_get_page(PAL_USER | PAL_ZERO);
 	if (kva == NULL) {
 		// PANIC("TODO: swap out");
+		free(frame);
 		frame = vm_evict_frame();
 
 		// frame->page = NULL;
@@ -188,9 +190,6 @@ vm_get_frame (void) {
 
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
-
-	/* frame table에 frame 추가 */
-	// list_push_front(&frame_table, &frame->frame_elem);
 
 	return frame;
 }

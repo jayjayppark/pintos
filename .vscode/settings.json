@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "inspect.h": "c",
+        "vm.h": "c",
+        "thread.h": "c"
+    }
+}
